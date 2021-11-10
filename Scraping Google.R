@@ -1,0 +1,7 @@
+pacman::p_load(rvest, dplyr, stringr)
+google <-read_html("https://news.google.com/")
+headline_all <-google %>% html_nodes("article") %>% html_text("span") %>% str_split("(?<=[a-z0-9!?\\.])(?=[A-Z])")
+headline_all <-sapply(headline_all, function(x) x[1])
+google_headlines<-data.frame(headlines= headline_all, stringsAsFactors = F)
+str(google_headlines)
+write.csv(google_headlines, "E:\\University Files\\Sem 2 Classes\\Marketing Analytics\\google_news_headlines4.csv")

@@ -1,0 +1,35 @@
+pacman::p_load(tidyr, dplyr, stringr, data.table, sentimentr, ggplot2, text2vec, tm, ggrepel)
+reviews_all = read.csv(file.choose(), stringsAsFactors = F)
+review_df <-reviews_all %>% mutate(id = row_number())
+str(reviews_all)
+nrow(lexicon::hash_sentiment_jockers_rinker)
+replace_in_lexicon <-tribble(~x, ~y,"switch", 0,"nintendo", 0,"red", 0, "amazeballs", .75,)
+review_lexicon <-lexicon::hash_sentiment_jockers_rinker %>%filter(!x %in% replace_in_lexicon$x) %>%bind_rows(replace_in_lexicon) %>%setDT() %>%setkey("x")
+sent_df <-review_df %>%get_sentences() %>%sentiment_by(by = c('id', 'author', 'date', 'stars', 'review_format'),polarity_dt = review_lexicon)
+tokens <-space_tokenizer(reviews_all$comments %>%tolower() %>%removePunctuation())
+it <-itoken(tokens, progressbar = FALSE)
+vocab <-create_vocabulary(it)
+vocab <-prune_vocabulary(vocab, term_count_min = 3L)
+vectorizer <-vocab_vectorizer(vocab)
+tcm <-create_tcm(it, vectorizer, skip_grams_window = 5L)
+glove = GloVe$new(rank = 100, x_max = 5)
+glove$fit_transform(tcm, n_iter = 20)
+word_vectors = glove$components
+pepper<-word_vectors[, "pepper", drop = F]
+cos_sim = sim2(x = t(word_vectors), y = t(pepper), method = "cosine", norm = "l2")
+head(sort(cos_sim[,1], decreasing = TRUE), 10)
+pacman::p_load(tm, Rtsne, tibble, tidytext, scales)
+keep_words <-setdiff(colnames(word_vectors), stopwords())
+word_vec <-word_vectors[, keep_words]
+train_df <-data.frame(t(word_vec)) %>% rownames_to_column("word")
+tsne <-Rtsne(train_df[,-1], dims = 2, perplexity = 50, verbose=TRUE, max_iter = 500)
+
+colors = rainbow(length(unique(train_df$word)))
+names(colors) = unique(train_df$word)
+plot_df <-data.frame(tsne$Y) %>% mutate(word = train_df$word,col = colors[train_df$word]) %>% left_join(vocab, by = c("word" = "term")) %>%filter(doc_count >= 20)
+ggplot(plot_df, aes(X1, X2)) +geom_text(aes(X1, X2, label = word, color = col), size = 3) +xlab("") + ylab("") +theme(legend.position = "none")
+
+word_sent <-review_df %>%left_join(sent_df, by = "id") %>%select(id, comments, ave_sentiment) %>%unnest_tokens(word, comments) %>%group_by(word) %>%summarise(count = n(),avg_sentiment = mean(ave_sentiment),sum_sentiment = sum(ave_sentiment),sd_sentiment = sd(ave_sentiment)) %>% anti_join(stop_words, by = "word")
+pd_sent <-plot_df %>%left_join(word_sent, by = "word") %>%drop_na() %>%filter(count >= 5)
+
+ggplot(pd_sent, aes(X1, X2)) +geom_point(aes(X1, X2, size = count, alpha = .1, color = avg_sentiment)) +geom_text(aes(X1, X2, label = word), size = 3) +scale_colour_gradient2(low = muted("red"), mid = "white",high = muted("blue"), midpoint = 0) +scale_size(range = c(5, 20)) +xlab("") + ylab("") +ggtitle("2-dimensional t-SNE Mapping of Word Vectors") +guides(color = guide_legend(title="Avg. Sentiment"), size = guide_legend(title = "Frequency"), alpha = NULL) +scale_alpha(range = c(1, 1), guide = "none")
